@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>patch-review</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      background: #f6f8fa;
+      color: #24292f;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #24292f;
+      color: #fff;
+      padding: 0 24px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 15px; font-weight: 600; }
+
+    main {
+      max-width: 760px;
+      margin: 32px auto;
+      padding: 0 16px;
+    }
+
+    .top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .top-row h2 { font-size: 16px; font-weight: 600; }
+
+    button {
+      padding: 6px 14px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      background: #f6f8fa;
+      color: #24292f;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    button:hover { background: #e9ebef; }
+    button.primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+    button.primary:hover { background: #1a7f37; }
+
+    #file-input { display: none; }
+
+    /* Upload drop zone */
+    #drop-zone {
+      border: 2px dashed #d0d7de;
+      border-radius: 8px;
+      padding: 28px;
+      text-align: center;
+      cursor: pointer;
+      background: #fff;
+      margin-bottom: 24px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: #0969da;
+      background: #ddf4ff;
+    }
+    #drop-zone p { color: #57606a; font-size: 13px; margin-top: 4px; }
+    #drop-zone.uploading { opacity: 0.6; pointer-events: none; }
+
+    /* Review list */
+    #review-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .review-card {
+      background: #fff;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.1s, box-shadow 0.1s;
+    }
+    .review-card:hover {
+      border-color: #0969da;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .review-card .rc-name {
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: #0969da;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .review-card .rc-date {
+      font-size: 12px;
+      color: #57606a;
+      white-space: nowrap;
+    }
+    .review-card .rc-badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+    .rc-badge.has-unresolved { background: #ffd8d3; color: #82071e; }
+    .rc-badge.all-resolved { background: #dafbe1; color: #116329; }
+    .rc-badge.no-comments { background: #f6f8fa; color: #57606a; border: 1px solid #d0d7de; }
+
+    #empty-state {
+      text-align: center;
+      padding: 48px 0;
+      color: #57606a;
+      font-size: 14px;
+    }
+    #empty-state p { margin-top: 6px; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>patch-review</h1>
+</header>
+
+<main>
+  <div id="drop-zone">
+    <strong>Drop a patch file to start a new review</strong>
+    <p>or click to browse &nbsp;·&nbsp; accepts any unified diff (.patch, .diff)</p>
+  </div>
+  <input type="file" id="file-input" accept=".patch,.diff">
+
+  <div class="top-row">
+    <h2>Reviews</h2>
+  </div>
+
+  <div id="review-list">
+    <div id="empty-state" class="hidden">
+      <strong>No reviews yet</strong>
+      <p>Upload a patch file above to create the first one.</p>
+    </div>
+  </div>
+</main>
+
+<script>
+  async function loadReviews() {
+    const r = await fetch('/reviews');
+    const reviews = await r.json();
+    const list = document.getElementById('review-list');
+    const empty = document.getElementById('empty-state');
+
+    // Remove existing cards (keep empty state element)
+    [...list.querySelectorAll('.review-card')].forEach(el => el.remove());
+
+    if (reviews.length === 0) {
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    for (const rv of reviews) {
+      const a = document.createElement('a');
+      a.className = 'review-card';
+      a.href = rv.url;
+
+      const name = document.createElement('span');
+      name.className = 'rc-name';
+      name.textContent = rv.patch_file || rv.id;
+
+      const date = document.createElement('span');
+      date.className = 'rc-date';
+      date.textContent = rv.created_at
+        ? new Date(rv.created_at).toLocaleString()
+        : '';
+
+      const badge = document.createElement('span');
+      badge.className = 'rc-badge';
+      if (rv.comment_count === 0) {
+        badge.textContent = 'No comments';
+        badge.classList.add('no-comments');
+      } else if (rv.unresolved_count > 0) {
+        badge.textContent = `${rv.unresolved_count} unresolved`;
+        badge.classList.add('has-unresolved');
+      } else {
+        badge.textContent = 'All resolved';
+        badge.classList.add('all-resolved');
+      }
+
+      a.appendChild(name);
+      a.appendChild(date);
+      a.appendChild(badge);
+      list.appendChild(a);
+    }
+  }
+
+  async function createReview(file) {
+    const dz = document.getElementById('drop-zone');
+    dz.classList.add('uploading');
+    dz.querySelector('strong').textContent = 'Uploading…';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/reviews', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      window.location.href = data.url;
+    } catch (e) {
+      dz.classList.remove('uploading');
+      dz.querySelector('strong').textContent = 'Drop a patch file to start a new review';
+      alert('Upload failed: ' + e.message);
+    }
+  }
+
+  // Drop zone
+  const dz = document.getElementById('drop-zone');
+  dz.addEventListener('click', () => document.getElementById('file-input').click());
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) createReview(e.dataTransfer.files[0]);
+  });
+  document.getElementById('file-input').addEventListener('change', e => {
+    if (e.target.files[0]) createReview(e.target.files[0]);
+  });
+
+  loadReviews();
+</script>
+
+</body>
+</html>

@@ -329,7 +329,7 @@
 <body>
 
 <header id="topbar">
-  <span id="topbar-title">patch-review</span>
+  <a href="/" id="topbar-title" style="color:inherit;text-decoration:none;">patch-review</a>
   <span id="patch-name"></span>
   <div id="view-toggle" class="hidden">
     <button id="btn-unified" class="active">Unified</button>
@@ -339,20 +339,7 @@
   <button id="btn-clear-resolved" class="small danger hidden">Clear resolved</button>
 </header>
 
-<div id="upload-area">
-  <div id="drop-zone">
-    <h2>Drop a patch file here</h2>
-    <p>or click to browse</p>
-    <div class="hint">
-      git diff &gt; review.patch &nbsp;·&nbsp;
-      p4 diff -du &gt; review.patch &nbsp;·&nbsp;
-      svn diff &gt; review.patch
-    </div>
-  </div>
-  <input type="file" id="file-input" accept=".patch,.diff">
-</div>
-
-<div id="review-layout" class="hidden">
+<div id="review-layout">
   <div id="diff-panel"></div>
   <div id="comment-sidebar">
     <div id="sidebar-header">
@@ -367,34 +354,29 @@
 
 <script>
   // ── State ────────────────────────────────────────────────────────────────
+  const reviewId = window.location.pathname.split('/')[2];
+  const API = `/reviews/${reviewId}`;
+
   let diffFiles = [];
   let comments = [];
   let viewMode = 'unified'; // 'unified' | 'split'
   let activeInputRow = null;
 
   // ── API ──────────────────────────────────────────────────────────────────
-  async function apiUpload(file) {
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch('/upload', { method: 'POST', body: fd });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-  }
-
   async function apiGetDiff() {
-    const r = await fetch('/diff');
+    const r = await fetch(`${API}/diff`);
     if (!r.ok) return null;
     return r.json();
   }
 
   async function apiGetComments() {
-    const r = await fetch('/comments');
+    const r = await fetch(`${API}/comments`);
     if (!r.ok) return { comments: [] };
     return r.json();
   }
 
   async function apiAddComment(file, line, lineContent, text) {
-    const r = await fetch('/comments', {
+    const r = await fetch(`${API}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file, line, line_content: lineContent, comment: text }),
@@ -404,7 +386,7 @@
   }
 
   async function apiSetResolved(id, resolved) {
-    const r = await fetch(`/comments/${id}`, {
+    const r = await fetch(`${API}/comments/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ resolved }),
@@ -414,7 +396,7 @@
   }
 
   async function apiDeleteComment(id) {
-    const r = await fetch(`/comments/${id}`, { method: 'DELETE' });
+    const r = await fetch(`${API}/comments/${id}`, { method: 'DELETE' });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
@@ -848,34 +830,16 @@
   }
 
   async function loadAll() {
-    const diffData = await apiGetDiff();
-    if (!diffData) return; // no patch loaded yet
+    const [diffData, reviewData] = await Promise.all([apiGetDiff(), apiGetComments()]);
+    if (!diffData) return;
 
     diffFiles = diffData.files;
-    const reviewData = await apiGetComments();
     comments = reviewData.comments || [];
 
     if (reviewData.patch_file) {
       document.getElementById('patch-name').textContent = reviewData.patch_file;
     }
 
-    showReviewLayout();
-  }
-
-  async function handleUpload(file) {
-    const result = await apiUpload(file);
-    document.getElementById('patch-name').textContent = result.filename;
-
-    const diffData = await apiGetDiff();
-    diffFiles = diffData.files;
-    comments = [];
-
-    showReviewLayout();
-  }
-
-  function showReviewLayout() {
-    document.getElementById('upload-area').classList.add('hidden');
-    document.getElementById('review-layout').classList.remove('hidden');
     document.getElementById('view-toggle').classList.remove('hidden');
     renderDiff();
     renderSidebar();
@@ -883,23 +847,6 @@
   }
 
   // ── Event wiring ─────────────────────────────────────────────────────────
-  document.getElementById('drop-zone').addEventListener('click', () => {
-    document.getElementById('file-input').click();
-  });
-
-  document.getElementById('file-input').addEventListener('change', e => {
-    if (e.target.files[0]) handleUpload(e.target.files[0]);
-  });
-
-  const dropZone = document.getElementById('drop-zone');
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-  dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    if (e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]);
-  });
-
   document.getElementById('btn-unified').addEventListener('click', () => {
     viewMode = 'unified';
     document.getElementById('btn-unified').classList.add('active');

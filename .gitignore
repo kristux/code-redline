@@ -10,8 +10,7 @@ dist/
 build/
 
 # Review tool runtime files
-review.json
-review.patch
+reviews/
 *.patch
 *.diff
 

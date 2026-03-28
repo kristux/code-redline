@@ -14,17 +14,14 @@ from pydantic import BaseModel
 
 app = FastAPI(title="patch-review")
 
-REVIEW_JSON = Path("review.json")
+REVIEWS_DIR = Path("reviews")
+HOME_HTML = Path("review_home.html")
 UI_HTML = Path("review_ui.html")
 
-# In-memory state for the current diff session
-_state = {
-    "parsed_diff": None,
-    "patch_filename": None,
-}
+# Parsed diff cache keyed by review ID
+_diff_cache: dict[str, list] = {}
 
 
-# --- Diff parsing ---
 
 def parse_unified_diff(content: str) -> list:
     files = []
@@ -82,19 +79,33 @@ def parse_unified_diff(content: str) -> list:
     return files
 
 
-# --- review.json helpers ---
 
-def load_review() -> dict:
-    if REVIEW_JSON.exists():
-        return json.loads(REVIEW_JSON.read_text())
-    return {"patch_file": None, "generated_at": None, "comments": []}
+def review_dir(review_id: str) -> Path:
+    return REVIEWS_DIR / review_id
 
 
-def save_review(data: dict) -> None:
-    REVIEW_JSON.write_text(json.dumps(data, indent=2))
+def load_review(review_id: str) -> dict:
+    path = review_dir(review_id) / "review.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Review not found")
+    return json.loads(path.read_text())
 
 
-# --- Pydantic models ---
+def save_review(review_id: str, data: dict) -> None:
+    tmp = review_dir(review_id) / "review.json.tmp"
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(review_dir(review_id) / "review.json")
+
+
+def get_diff(review_id: str) -> list:
+    if review_id not in _diff_cache:
+        patch_path = review_dir(review_id) / "review.patch"
+        if not patch_path.exists():
+            raise HTTPException(status_code=404, detail="Review not found")
+        _diff_cache[review_id] = parse_unified_diff(patch_path.read_text())
+    return _diff_cache[review_id]
+
+
 
 class CommentCreate(BaseModel):
     file: str
@@ -108,45 +119,93 @@ class CommentPatch(BaseModel):
     resolution_note: Optional[str] = None
 
 
-# --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_ui():
-    if not UI_HTML.exists():
-        return HTMLResponse("<h1>review_ui.html not found — build it next!</h1>", status_code=503)
-    return HTMLResponse(UI_HTML.read_text())
+async def serve_home():
+    if not HOME_HTML.exists():
+        return HTMLResponse("<h1>review_home.html not found</h1>", status_code=503)
+    return HTMLResponse(HOME_HTML.read_text())
 
 
-@app.post("/upload")
-async def upload_patch(file: UploadFile = File(...)):
+@app.get("/reviews", response_model=list)
+async def list_reviews():
+    if not REVIEWS_DIR.exists():
+        return []
+    reviews = []
+    for d in sorted(REVIEWS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        meta_path = d / "review.json"
+        if not meta_path.exists():
+            continue
+        try:
+            data = json.loads(meta_path.read_text())
+            total = len(data.get("comments", []))
+            unresolved = sum(1 for c in data.get("comments", []) if not c.get("resolved"))
+            reviews.append({
+                "id": d.name,
+                "patch_file": data.get("patch_file"),
+                "created_at": data.get("created_at"),
+                "comment_count": total,
+                "unresolved_count": unresolved,
+                "url": f"/reviews/{d.name}",
+            })
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return reviews
+
+
+
+@app.post("/reviews")
+async def create_review(file: UploadFile = File(...)):
     content = (await file.read()).decode("utf-8", errors="replace")
-    _state["parsed_diff"] = parse_unified_diff(content)
-    _state["patch_filename"] = file.filename
+    review_id = uuid.uuid4().hex
+
+    REVIEWS_DIR.mkdir(exist_ok=True)
+    review_dir(review_id).mkdir()
+
+    parsed = parse_unified_diff(content)
+    _diff_cache[review_id] = parsed
+
+    (review_dir(review_id) / "review.patch").write_text(content)
 
     review = {
         "patch_file": file.filename,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "comments": [],
     }
-    save_review(review)
-    return {"files": len(_state["parsed_diff"]), "filename": file.filename}
+    save_review(review_id, review)
+
+    return {
+        "id": review_id,
+        "patch_file": file.filename,
+        "files": len(parsed),
+        "url": f"/reviews/{review_id}",
+    }
 
 
-@app.get("/diff")
-async def get_diff():
-    if _state["parsed_diff"] is None:
-        raise HTTPException(status_code=404, detail="No patch loaded")
-    return {"files": _state["parsed_diff"]}
+
+@app.get("/reviews/{review_id}", response_class=HTMLResponse)
+async def serve_review(review_id: str):
+    if not (review_dir(review_id) / "review.json").exists():
+        raise HTTPException(status_code=404, detail="Review not found")
+    if not UI_HTML.exists():
+        return HTMLResponse("<h1>review_ui.html not found</h1>", status_code=503)
+    return HTMLResponse(UI_HTML.read_text())
 
 
-@app.get("/comments")
-async def get_comments():
-    return load_review()
+
+@app.get("/reviews/{review_id}/diff")
+async def get_review_diff(review_id: str):
+    return {"files": get_diff(review_id)}
 
 
-@app.post("/comments")
-async def add_comment(body: CommentCreate):
-    review = load_review()
+@app.get("/reviews/{review_id}/comments")
+async def get_review_comments(review_id: str):
+    return load_review(review_id)
+
+
+@app.post("/reviews/{review_id}/comments")
+async def add_comment(review_id: str, body: CommentCreate):
+    review = load_review(review_id)
     comment = {
         "id": f"c{uuid.uuid4().hex[:8]}",
         "file": body.file,
@@ -157,36 +216,35 @@ async def add_comment(body: CommentCreate):
         "resolved_at": None,
     }
     review["comments"].append(comment)
-    save_review(review)
+    save_review(review_id, review)
     return comment
 
 
-@app.patch("/comments/{comment_id}")
-async def patch_comment(comment_id: str, body: CommentPatch):
-    review = load_review()
+@app.patch("/reviews/{review_id}/comments/{comment_id}")
+async def patch_comment(review_id: str, comment_id: str, body: CommentPatch):
+    review = load_review(review_id)
     for c in review["comments"]:
         if c["id"] == comment_id:
             c["resolved"] = body.resolved
             c["resolved_at"] = datetime.now(timezone.utc).isoformat() if body.resolved else None
             if body.resolution_note is not None:
                 c["resolution_note"] = body.resolution_note
-            save_review(review)
+            save_review(review_id, review)
             return c
     raise HTTPException(status_code=404, detail="Comment not found")
 
 
-@app.delete("/comments/{comment_id}")
-async def delete_comment(comment_id: str):
-    review = load_review()
+@app.delete("/reviews/{review_id}/comments/{comment_id}")
+async def delete_comment(review_id: str, comment_id: str):
+    review = load_review(review_id)
     before = len(review["comments"])
     review["comments"] = [c for c in review["comments"] if c["id"] != comment_id]
     if len(review["comments"]) == before:
         raise HTTPException(status_code=404, detail="Comment not found")
-    save_review(review)
+    save_review(review_id, review)
     return {"deleted": comment_id}
 
 
-# --- Entrypoint ---
 
 def _open_browser():
     import time
