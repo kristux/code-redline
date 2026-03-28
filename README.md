@@ -1,4 +1,4 @@
-# patch-review
+# code-redline
 
 A lightweight local code review tool for AI-assisted development workflows.
 
