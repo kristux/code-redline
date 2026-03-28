@@ -73,11 +73,13 @@ No MCP server, no special tooling. Just files and a REST API.
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python review_server.py
+# Opens http://localhost:7890
 ```
 
 **Docker:**
 ```bash
 docker compose up --build
+# Available at http://localhost:7890
 ```
 
 Reviews are stored in `./reviews/` on the host and persist across restarts.
