@@ -1,0 +1,7 @@
+services:
+  code-redline:
+    build: .
+    ports:
+      - "7890:7890"
+    volumes:
+      - ./reviews:/app/reviews
