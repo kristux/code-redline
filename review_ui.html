@@ -602,23 +602,32 @@
       table.appendChild(hunkRow);
 
       for (const ln of hunk.lines) {
-        const lineNum = ln.new_line; // always key comments to new-file line numbers
+        // Removed lines use a negative old-line number as the comment key
+        const commentKey = ln.type === 'removed' ? -(ln.old_line) : ln.new_line;
         const row = document.createElement('tr');
         row.className = `ln-${ln.type}`;
         row.dataset.file = fileName;
-        row.dataset.line = lineNum ?? ln.old_line;
+        row.dataset.line = commentKey;
 
         const tdOld = document.createElement('td');
-        tdOld.className = 'ln';
+        if (ln.type === 'removed') {
+          tdOld.className = 'ln ln-click';
+          tdOld.title = 'Add comment';
+          tdOld.addEventListener('click', () =>
+            openCommentInput(fileName, commentKey, ln.content, row)
+          );
+        } else {
+          tdOld.className = 'ln';
+        }
         tdOld.textContent = ln.old_line ?? '';
 
         const tdNew = document.createElement('td');
         tdNew.textContent = ln.new_line ?? '';
-        if (lineNum !== null) {
+        if (ln.type !== 'removed') {
           tdNew.className = 'ln ln-click';
           tdNew.title = 'Add comment';
           tdNew.addEventListener('click', () =>
-            openCommentInput(fileName, lineNum, ln.content, row)
+            openCommentInput(fileName, commentKey, ln.content, row)
           );
         } else {
           tdNew.className = 'ln';
@@ -638,10 +647,8 @@
         row.appendChild(tdCode);
         table.appendChild(row);
 
-        if (lineNum !== null) {
-          for (const c of commentsFor(fileName, lineNum)) {
-            table.appendChild(makeInlineCommentRow(c, 4));
-          }
+        for (const c of commentsFor(fileName, commentKey)) {
+          table.appendChild(makeInlineCommentRow(c, 4));
         }
       }
     }
@@ -754,10 +761,21 @@
                 table.appendChild(makeInlineCommentRow(c, 7));
               }
             } else {
+              // Removed-only row: make old line number clickable
+              const commentKey = -(rem.old_line);
+              const tdOldLn = row.children[0]; // already appended above
+              tdOldLn.classList.add('ln-click');
+              tdOldLn.title = 'Add comment';
+              tdOldLn.addEventListener('click', () =>
+                openCommentInput(fileName, commentKey, rem.content, row)
+              );
               row.appendChild(mkTd('ln split-new', ''));
               row.appendChild(mkTd('sign split-new', ''));
               row.appendChild(mkTd('code split-new', ''));
               table.appendChild(row);
+              for (const c of commentsFor(fileName, commentKey)) {
+                table.appendChild(makeInlineCommentRow(c, 7));
+              }
             }
           }
         } else {
@@ -817,7 +835,9 @@
 
       const loc = document.createElement('div');
       loc.className = 'sc-loc';
-      loc.textContent = `${c.file}:${c.line}`;
+      loc.textContent = c.line < 0
+        ? `${c.file}:old:${-c.line}`
+        : `${c.file}:${c.line}`;
 
       const text = document.createElement('div');
       text.className = 'sc-text';
