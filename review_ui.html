@@ -343,6 +343,24 @@
     }
     #btn-upload-revision { display: none; }
     #revision-file-input { display: none; }
+
+    #interdiff-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #interdiff-controls select {
+      background: #30363d;
+      border: 1px solid #444c56;
+      border-radius: 4px;
+      color: #e6edf3;
+      font-size: 12px;
+      padding: 3px 6px;
+      cursor: pointer;
+    }
+    #interdiff-controls select:focus { outline: none; border-color: #58a6ff; }
+    #btn-full-diff { color: #58a6ff; border-color: #444c56; background: transparent; }
+    #btn-full-diff:hover { background: #30363d; }
   </style>
 </head>
 <body>
@@ -351,6 +369,14 @@
   <a href="/" id="topbar-title" style="color:inherit;text-decoration:none;">patch-review</a>
   <span id="patch-name"></span>
   <span id="revision-badge" class="hidden"></span>
+  <div id="interdiff-controls" class="hidden">
+    <label style="font-size:12px;color:#8b949e;">Compare:</label>
+    <select id="interdiff-from" title="From revision"></select>
+    <span style="font-size:12px;color:#8b949e;">→</span>
+    <select id="interdiff-to" title="To revision"></select>
+    <button id="btn-interdiff" class="small">Interdiff</button>
+    <button id="btn-full-diff" class="small hidden">Full diff</button>
+  </div>
   <div id="view-toggle" class="hidden">
     <button id="btn-unified" class="active">Unified</button>
     <button id="btn-split">Split</button>
@@ -384,10 +410,15 @@
   let currentRevision = 1;
   let viewMode = 'unified'; // 'unified' | 'split'
   let activeInputRow = null;
+  let interdiffMode = false;
 
   // ── API ──────────────────────────────────────────────────────────────────
-  async function apiGetDiff() {
-    const r = await fetch(`${API}/diff`);
+  async function apiGetDiff(fromRevision = null, toRevision = null) {
+    let url = `${API}/diff`;
+    if (fromRevision !== null && toRevision !== null) {
+      url += `?from_revision=${fromRevision}&to_revision=${toRevision}`;
+    }
+    const r = await fetch(url);
     if (!r.ok) return null;
     return r.json();
   }
@@ -465,6 +496,7 @@
   }
 
   function openCommentInput(file, line, lineContent, afterRow) {
+    if (interdiffMode) return;
     closeCommentInput();
 
     const tr = document.createElement('tr');
@@ -883,6 +915,34 @@
     if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  // ── Interdiff ─────────────────────────────────────────────────────────────
+  async function loadInterdiff(fromRevision, toRevision) {
+    const diffData = await apiGetDiff(fromRevision, toRevision);
+    if (!diffData) { alert('Failed to load interdiff.'); return; }
+    interdiffMode = true;
+    diffFiles = diffData.files;
+    document.getElementById('btn-interdiff').classList.add('hidden');
+    document.getElementById('btn-full-diff').classList.remove('hidden');
+    document.getElementById('revision-badge').textContent = `rev ${fromRevision} → ${toRevision}`;
+    document.getElementById('comment-stats').classList.add('hidden');
+    closeCommentInput();
+    renderDiff();
+  }
+
+  async function exitInterdiffMode() {
+    interdiffMode = false;
+    document.getElementById('btn-full-diff').classList.add('hidden');
+    document.getElementById('btn-interdiff').classList.remove('hidden');
+    const diffData = await apiGetDiff();
+    if (!diffData) return;
+    diffFiles = diffData.files;
+    document.getElementById('revision-badge').textContent = `rev ${currentRevision}`;
+    closeCommentInput();
+    renderDiff();
+    renderSidebar();
+    updateStats();
+  }
+
   // ── Data loading ─────────────────────────────────────────────────────────
   async function reloadComments() {
     const data = await apiGetComments();
@@ -893,6 +953,7 @@
   }
 
   async function loadAll() {
+    interdiffMode = false;
     const [diffData, reviewData] = await Promise.all([apiGetDiff(), apiGetComments()]);
     if (!diffData) return;
 
@@ -906,6 +967,25 @@
       const badge = document.getElementById('revision-badge');
       badge.textContent = `rev ${currentRevision}`;
       badge.classList.remove('hidden');
+    }
+
+    if (reviewData.revisions && reviewData.revisions.length >= 2) {
+      const total = reviewData.revisions.length;
+      const fromSel = document.getElementById('interdiff-from');
+      const toSel = document.getElementById('interdiff-to');
+      fromSel.innerHTML = '';
+      toSel.innerHTML = '';
+      for (let n = 1; n <= total; n++) {
+        const o = document.createElement('option');
+        o.value = n; o.textContent = `rev ${n}`;
+        fromSel.appendChild(o.cloneNode(true));
+        toSel.appendChild(o);
+      }
+      fromSel.value = total - 1;
+      toSel.value = total;
+      document.getElementById('interdiff-controls').classList.remove('hidden');
+      document.getElementById('btn-full-diff').classList.add('hidden');
+      document.getElementById('btn-interdiff').classList.remove('hidden');
     }
 
     document.getElementById('view-toggle').classList.remove('hidden');
@@ -960,6 +1040,15 @@
       e.target.value = '';
     }
   });
+
+  document.getElementById('btn-interdiff').addEventListener('click', () => {
+    const from = parseInt(document.getElementById('interdiff-from').value, 10);
+    const to = parseInt(document.getElementById('interdiff-to').value, 10);
+    if (from === to) { alert('Choose two different revisions.'); return; }
+    loadInterdiff(from, to);
+  });
+
+  document.getElementById('btn-full-diff').addEventListener('click', exitInterdiffMode);
 
   // ── Boot ─────────────────────────────────────────────────────────────────
   loadAll();

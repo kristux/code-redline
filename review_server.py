@@ -1,3 +1,4 @@
+import difflib
 import json
 import re
 import threading
@@ -75,6 +76,35 @@ def parse_unified_diff(content: str) -> list:
         files.append(current_file)
 
     return files
+
+
+def compute_interdiff(patch1: str, patch2: str) -> list:
+    def extract_new_state(parsed_files: list, filename: str) -> list[str]:
+        for f in parsed_files:
+            if (f["new_file"] == filename) or (f["old_file"] == filename):
+                return [ln["content"] for hunk in f["hunks"]
+                        for ln in hunk["lines"] if ln["type"] in ("context", "added")]
+        return []
+
+    files1 = parse_unified_diff(patch1)
+    files2 = parse_unified_diff(patch2)
+    names = sorted({f["new_file"] or f["old_file"] for f in files1} |
+                   {f["new_file"] or f["old_file"] for f in files2})
+
+    diff_parts = []
+    for name in names:
+        a = extract_new_state(files1, name)
+        b = extract_new_state(files2, name)
+        if a == b:
+            continue
+        diff = list(difflib.unified_diff(
+            [l + "\n" for l in a], [l + "\n" for l in b],
+            fromfile=f"a/{name}", tofile=f"b/{name}", lineterm="",
+        ))
+        if diff:
+            diff_parts.append("\n".join(diff))
+
+    return parse_unified_diff("\n".join(diff_parts)) if diff_parts else []
 
 
 def review_dir(review_id: str) -> Path:
@@ -224,8 +254,28 @@ async def serve_review(review_id: str):
 
 
 @app.get("/reviews/{review_id}/diff")
-async def get_review_diff(review_id: str):
-    return {"files": get_diff(review_id)}
+async def get_review_diff(
+    review_id: str,
+    from_revision: Optional[int] = None,
+    to_revision: Optional[int] = None,
+):
+    review = load_review(review_id)
+    total = len(review["revisions"])
+
+    if from_revision is None and to_revision is None:
+        return {"files": get_diff(review_id), "mode": "full"}
+
+    if from_revision is None or to_revision is None:
+        raise HTTPException(status_code=400, detail="Provide both from_revision and to_revision")
+    if not (1 <= from_revision <= total and 1 <= to_revision <= total):
+        raise HTTPException(status_code=400, detail="Revision out of range")
+    if from_revision == to_revision:
+        raise HTTPException(status_code=400, detail="from_revision and to_revision must differ")
+
+    p1 = (review_dir(review_id) / f"r{from_revision}.patch").read_text()
+    p2 = (review_dir(review_id) / f"r{to_revision}.patch").read_text()
+    return {"files": compute_interdiff(p1, p2), "mode": "interdiff",
+            "from_revision": from_revision, "to_revision": to_revision}
 
 
 @app.get("/reviews/{review_id}/comments")
