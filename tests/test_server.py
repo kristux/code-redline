@@ -172,3 +172,20 @@ def test_resolve_with_resolution_note(loaded):
 def test_patch_unknown_comment_returns_404(loaded):
     r = loaded.patch("/comments/doesnotexist", json={"resolved": True})
     assert r.status_code == 404
+
+
+# --- /comments/{id} DELETE ---
+
+def test_delete_comment(loaded):
+    comment_id = loaded.post("/comments", json={
+        "file": "foo.py", "line": 2, "line_content": "x", "comment": "remove me"
+    }).json()["id"]
+
+    r = loaded.delete(f"/comments/{comment_id}")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": comment_id}
+    assert all(c["id"] != comment_id for c in loaded.get("/comments").json()["comments"])
+
+
+def test_delete_unknown_comment_returns_404(loaded):
+    assert loaded.delete("/comments/doesnotexist").status_code == 404

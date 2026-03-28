@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>patch-review</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      background: #f6f8fa;
+      color: #24292f;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ── */
+    #topbar {
+      background: #24292f;
+      color: #fff;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 44px;
+      flex-shrink: 0;
+    }
+    #topbar-title { font-size: 15px; font-weight: 600; }
+    #patch-name { font-family: monospace; font-size: 12px; color: #8b949e; }
+    #comment-stats { font-size: 13px; color: #8b949e; margin-left: auto; }
+    .stat-unresolved { color: #f78166; font-weight: 600; }
+    .stat-resolved { color: #3fb950; }
+    #view-toggle {
+      display: flex;
+      border: 1px solid #444c56;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    #view-toggle button {
+      background: transparent;
+      border: none;
+      color: #8b949e;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 0;
+    }
+    #view-toggle button.active { background: #444c56; color: #fff; }
+    #view-toggle button:hover:not(.active) { background: #30363d; }
+
+    /* ── Shared button styles ── */
+    button {
+      padding: 5px 12px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      background: #f6f8fa;
+      color: #24292f;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    button:hover { background: #e9ebef; }
+    button.primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+    button.primary:hover { background: #1a7f37; }
+    button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.cancel { background: transparent; color: #57606a; border-color: #d0d7de; }
+    button.cancel:hover { background: #f6f8fa; }
+    button.danger { color: #cf222e; border-color: #d0d7de; background: transparent; }
+    button.danger:hover { background: #fff0ee; }
+    button.small { padding: 2px 8px; font-size: 12px; }
+
+    /* ── Upload area ── */
+    #upload-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #drop-zone {
+      border: 2px dashed #d0d7de;
+      border-radius: 12px;
+      padding: 56px 80px;
+      text-align: center;
+      cursor: pointer;
+      background: #fff;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: #0969da;
+      background: #ddf4ff;
+    }
+    #drop-zone h2 { font-size: 18px; color: #24292f; margin-bottom: 8px; }
+    #drop-zone p { color: #57606a; font-size: 13px; }
+    #drop-zone .hint { margin-top: 16px; font-size: 12px; color: #8b949e; font-family: monospace; }
+    #file-input { display: none; }
+
+    /* ── Review layout ── */
+    #review-layout {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    #diff-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    #comment-sidebar {
+      width: 280px;
+      flex-shrink: 0;
+      border-left: 1px solid #d0d7de;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #sidebar-header {
+      padding: 10px 12px;
+      border-bottom: 1px solid #d0d7de;
+      background: #f6f8fa;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    #sidebar-header span { font-weight: 600; font-size: 13px; }
+    #comment-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    #empty-sidebar {
+      padding: 16px 12px;
+      color: #57606a;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* Sidebar comment card */
+    .sc {
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      background: #fff;
+      cursor: pointer;
+      transition: border-color 0.1s;
+    }
+    .sc:hover { border-color: #0969da; }
+    .sc.resolved { opacity: 0.5; }
+    .sc-loc { font-family: monospace; font-size: 11px; color: #57606a; margin-bottom: 3px; }
+    .sc-text { color: #24292f; line-height: 1.4; margin-bottom: 6px; }
+    .sc.resolved .sc-text { text-decoration: line-through; }
+    .sc-note { font-size: 11px; color: #1a7f37; margin-bottom: 4px; font-style: italic; }
+    .sc-actions { display: flex; gap: 6px; }
+
+    /* ── File block ── */
+    .file-block {
+      margin-bottom: 20px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .file-header {
+      background: #f6f8fa;
+      padding: 8px 14px;
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 600;
+      border-bottom: 1px solid #d0d7de;
+    }
+
+    /* ── Unified diff table ── */
+    .diff-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .diff-table .hunk-hdr td {
+      background: #ddf4ff;
+      color: #0550ae;
+      padding: 2px 10px;
+      font-size: 12px;
+      border-top: 1px solid #b6e3ff;
+    }
+    .diff-table .ln-added { background: #ccffd8; }
+    .diff-table .ln-removed { background: #ffd7d5; }
+    .diff-table .ln-context { background: #fff; }
+    .diff-table td.ln {
+      width: 42px;
+      min-width: 42px;
+      text-align: right;
+      padding: 0 6px;
+      color: #57606a;
+      user-select: none;
+      border-right: 1px solid #e1e4e8;
+      vertical-align: top;
+    }
+    .diff-table td.ln-click {
+      cursor: pointer;
+    }
+    .diff-table td.ln-click:hover { background: #b6d7ff; color: #0550ae; }
+    .diff-table td.sign {
+      width: 18px;
+      min-width: 18px;
+      text-align: center;
+      padding: 0 2px;
+      user-select: none;
+      vertical-align: top;
+    }
+    .ln-added .sign { color: #1a7f37; }
+    .ln-removed .sign { color: #cf222e; }
+    .diff-table td.code {
+      padding: 0 8px;
+      white-space: pre;
+      overflow: visible;
+    }
+    .ln-added .code { color: #1a7f37; }
+    .ln-removed .code { color: #cf222e; }
+
+    /* ── Split diff table ── */
+    .split-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      table-layout: fixed;
+    }
+    .split-table .hunk-hdr td {
+      background: #ddf4ff;
+      color: #0550ae;
+      padding: 2px 10px;
+      font-size: 12px;
+      border-top: 1px solid #b6e3ff;
+    }
+    .split-table td.ln {
+      width: 42px;
+      text-align: right;
+      padding: 0 6px;
+      color: #57606a;
+      user-select: none;
+      border-right: 1px solid #e1e4e8;
+      vertical-align: top;
+    }
+    .split-table td.ln-click { cursor: pointer; }
+    .split-table td.ln-click:hover { background: #b6d7ff; color: #0550ae; }
+    .split-table td.sign {
+      width: 18px;
+      text-align: center;
+      padding: 0 2px;
+      user-select: none;
+      vertical-align: top;
+    }
+    .split-table td.code {
+      padding: 0 8px;
+      white-space: pre;
+      overflow: hidden;
+    }
+    .split-table .split-divider {
+      width: 1px;
+      background: #d0d7de;
+      padding: 0;
+    }
+    .split-old { background: #fff; }
+    .split-old.has-content { background: #ffd7d5; }
+    .split-old.has-content .code { color: #cf222e; }
+    .split-old.has-content .sign { color: #cf222e; }
+    .split-new { background: #fff; }
+    .split-new.has-content { background: #ccffd8; }
+    .split-new.has-content .code { color: #1a7f37; }
+    .split-new.has-content .sign { color: #1a7f37; }
+
+    /* ── Inline comment rows ── */
+    .comment-row td {
+      padding: 0;
+      background: #fff;
+    }
+    .inline-comment {
+      border-left: 3px solid #e3b341;
+      padding: 6px 10px 6px 12px;
+      margin: 2px 0 2px 82px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #fffbdd;
+    }
+    .inline-comment.resolved {
+      border-left-color: #8b949e;
+      opacity: 0.55;
+      background: #f6f8fa;
+    }
+    .ic-text { font-size: 13px; color: #24292f; margin-bottom: 4px; }
+    .inline-comment.resolved .ic-text { text-decoration: line-through; color: #57606a; }
+    .ic-note { font-size: 11px; color: #1a7f37; margin-bottom: 3px; font-style: italic; }
+    .ic-meta { font-size: 11px; color: #57606a; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+    /* ── Comment input ── */
+    .comment-input-row td {
+      padding: 8px 8px 8px 82px;
+      background: #f6f8fa;
+      border-top: 1px solid #e1e4e8;
+      border-bottom: 1px solid #e1e4e8;
+    }
+    .comment-form { display: flex; flex-direction: column; gap: 6px; max-width: 600px; }
+    .comment-form textarea {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+      min-height: 64px;
+    }
+    .comment-form textarea:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,0.1); }
+    .form-hint { font-size: 11px; color: #8b949e; }
+    .form-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header id="topbar">
+  <span id="topbar-title">patch-review</span>
+  <span id="patch-name"></span>
+  <div id="view-toggle" class="hidden">
+    <button id="btn-unified" class="active">Unified</button>
+    <button id="btn-split">Split</button>
+  </div>
+  <span id="comment-stats" class="hidden"></span>
+  <button id="btn-clear-resolved" class="small danger hidden">Clear resolved</button>
+</header>
+
+<div id="upload-area">
+  <div id="drop-zone">
+    <h2>Drop a patch file here</h2>
+    <p>or click to browse</p>
+    <div class="hint">
+      git diff &gt; review.patch &nbsp;·&nbsp;
+      p4 diff -du &gt; review.patch &nbsp;·&nbsp;
+      svn diff &gt; review.patch
+    </div>
+  </div>
+  <input type="file" id="file-input" accept=".patch,.diff">
+</div>
+
+<div id="review-layout" class="hidden">
+  <div id="diff-panel"></div>
+  <div id="comment-sidebar">
+    <div id="sidebar-header">
+      <span>Comments</span>
+      <button id="btn-reload" class="small" title="Reload comments from server">↻</button>
+    </div>
+    <div id="comment-list">
+      <div id="empty-sidebar">Click any line number in the diff to add a comment.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────────
+  let diffFiles = [];
+  let comments = [];
+  let viewMode = 'unified'; // 'unified' | 'split'
+  let activeInputRow = null;
+
+  // ── API ──────────────────────────────────────────────────────────────────
+  async function apiUpload(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/upload', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function apiGetDiff() {
+    const r = await fetch('/diff');
+    if (!r.ok) return null;
+    return r.json();
+  }
+
+  async function apiGetComments() {
+    const r = await fetch('/comments');
+    if (!r.ok) return { comments: [] };
+    return r.json();
+  }
+
+  async function apiAddComment(file, line, lineContent, text) {
+    const r = await fetch('/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file, line, line_content: lineContent, comment: text }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function apiSetResolved(id, resolved) {
+    const r = await fetch(`/comments/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resolved }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function apiDeleteComment(id) {
+    const r = await fetch(`/comments/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function commentsFor(file, line) {
+    return comments.filter(c => c.file === file && c.line === line);
+  }
+
+  function updateStats() {
+    const total = comments.length;
+    const unresolved = comments.filter(c => !c.resolved).length;
+    const resolved = total - unresolved;
+    const statsEl = document.getElementById('comment-stats');
+    const clearBtn = document.getElementById('btn-clear-resolved');
+
+    if (total === 0) {
+      statsEl.classList.add('hidden');
+      clearBtn.classList.add('hidden');
+      return;
+    }
+    statsEl.classList.remove('hidden');
+    statsEl.innerHTML =
+      `<span class="stat-unresolved">${unresolved} unresolved</span>` +
+      (resolved ? ` · <span class="stat-resolved">${resolved} resolved</span>` : '');
+    clearBtn.classList.toggle('hidden', resolved === 0);
+  }
+
+  // ── Comment input ────────────────────────────────────────────────────────
+  function closeCommentInput() {
+    if (activeInputRow) {
+      activeInputRow.remove();
+      activeInputRow = null;
+    }
+  }
+
+  function openCommentInput(file, line, lineContent, afterRow) {
+    closeCommentInput();
+
+    const tr = document.createElement('tr');
+    tr.className = 'comment-input-row';
+    const td = document.createElement('td');
+    td.colSpan = 10;
+
+    const form = document.createElement('div');
+    form.className = 'comment-form';
+
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Add a review comment…';
+
+    const hint = document.createElement('div');
+    hint.className = 'form-hint';
+    hint.textContent = '⌘↵ or Ctrl↵ to submit · Esc to cancel';
+
+    const buttons = document.createElement('div');
+    buttons.className = 'form-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cancel small';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', closeCommentInput);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'primary small';
+    submitBtn.textContent = 'Add comment';
+    submitBtn.addEventListener('click', async () => {
+      const text = textarea.value.trim();
+      if (!text) return;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving…';
+      try {
+        await apiAddComment(file, line, lineContent, text);
+        closeCommentInput();
+        await reloadComments();
+      } catch (e) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Add comment';
+        alert('Failed to save comment: ' + e.message);
+      }
+    });
+
+    textarea.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitBtn.click();
+      if (e.key === 'Escape') cancelBtn.click();
+    });
+
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(submitBtn);
+    form.appendChild(textarea);
+    form.appendChild(hint);
+    form.appendChild(buttons);
+    td.appendChild(form);
+    tr.appendChild(td);
+
+    // Insert after afterRow, skipping any existing comment rows for that line
+    let insertAfter = afterRow;
+    while (
+      insertAfter.nextElementSibling &&
+      insertAfter.nextElementSibling.classList.contains('comment-row')
+    ) {
+      insertAfter = insertAfter.nextElementSibling;
+    }
+    insertAfter.insertAdjacentElement('afterend', tr);
+    activeInputRow = tr;
+    textarea.focus();
+  }
+
+  // ── Inline comment row ───────────────────────────────────────────────────
+  function makeInlineCommentRow(c, colSpan) {
+    const tr = document.createElement('tr');
+    tr.className = 'comment-row';
+    tr.dataset.commentId = c.id;
+    const td = document.createElement('td');
+    td.colSpan = colSpan;
+
+    const div = document.createElement('div');
+    div.className = `inline-comment${c.resolved ? ' resolved' : ''}`;
+
+    const text = document.createElement('div');
+    text.className = 'ic-text';
+    text.textContent = c.comment;
+    div.appendChild(text);
+
+    if (c.resolution_note) {
+      const note = document.createElement('div');
+      note.className = 'ic-note';
+      note.textContent = '✓ ' + c.resolution_note;
+      div.appendChild(note);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'ic-meta';
+    if (c.resolved && c.resolved_at) {
+      const ts = document.createElement('span');
+      ts.textContent = 'resolved ' + new Date(c.resolved_at).toLocaleString();
+      meta.appendChild(ts);
+    }
+    const resolveBtn = document.createElement('button');
+    resolveBtn.className = 'small';
+    resolveBtn.textContent = c.resolved ? 'Unresolve' : 'Resolve';
+    resolveBtn.addEventListener('click', async () => {
+      await apiSetResolved(c.id, !c.resolved);
+      await reloadComments();
+    });
+    meta.appendChild(resolveBtn);
+    div.appendChild(meta);
+
+    td.appendChild(div);
+    tr.appendChild(td);
+    return tr;
+  }
+
+  // ── Unified diff rendering ───────────────────────────────────────────────
+  function renderUnified(file, container) {
+    const table = document.createElement('table');
+    table.className = 'diff-table';
+    const fileName = file.new_file || file.old_file;
+
+    for (const hunk of file.hunks) {
+      const hunkRow = document.createElement('tr');
+      hunkRow.className = 'hunk-hdr';
+      const hunkTd = document.createElement('td');
+      hunkTd.colSpan = 4;
+      hunkTd.textContent = hunk.header;
+      hunkRow.appendChild(hunkTd);
+      table.appendChild(hunkRow);
+
+      for (const ln of hunk.lines) {
+        const lineNum = ln.new_line; // always key comments to new-file line numbers
+        const row = document.createElement('tr');
+        row.className = `ln-${ln.type}`;
+        row.dataset.file = fileName;
+        row.dataset.line = lineNum ?? ln.old_line;
+
+        const tdOld = document.createElement('td');
+        tdOld.className = 'ln';
+        tdOld.textContent = ln.old_line ?? '';
+
+        const tdNew = document.createElement('td');
+        tdNew.textContent = ln.new_line ?? '';
+        if (lineNum !== null) {
+          tdNew.className = 'ln ln-click';
+          tdNew.title = 'Add comment';
+          tdNew.addEventListener('click', () =>
+            openCommentInput(fileName, lineNum, ln.content, row)
+          );
+        } else {
+          tdNew.className = 'ln';
+        }
+
+        const tdSign = document.createElement('td');
+        tdSign.className = 'sign';
+        tdSign.textContent = ln.type === 'added' ? '+' : ln.type === 'removed' ? '-' : ' ';
+
+        const tdCode = document.createElement('td');
+        tdCode.className = 'code';
+        tdCode.textContent = ln.content;
+
+        row.appendChild(tdOld);
+        row.appendChild(tdNew);
+        row.appendChild(tdSign);
+        row.appendChild(tdCode);
+        table.appendChild(row);
+
+        if (lineNum !== null) {
+          for (const c of commentsFor(fileName, lineNum)) {
+            table.appendChild(makeInlineCommentRow(c, 4));
+          }
+        }
+      }
+    }
+    container.appendChild(table);
+  }
+
+  // ── Split diff rendering ─────────────────────────────────────────────────
+  function renderSplit(file, container) {
+    const table = document.createElement('table');
+    table.className = 'split-table';
+    const fileName = file.new_file || file.old_file;
+
+    for (const hunk of file.hunks) {
+      const hunkRow = document.createElement('tr');
+      hunkRow.className = 'hunk-hdr';
+      const hunkTd = document.createElement('td');
+      hunkTd.colSpan = 7;
+      hunkTd.textContent = hunk.header;
+      hunkRow.appendChild(hunkTd);
+      table.appendChild(hunkRow);
+
+      // Group consecutive removed/added lines into pairs
+      let i = 0;
+      const lines = hunk.lines;
+      while (i < lines.length) {
+        const ln = lines[i];
+
+        if (ln.type === 'context') {
+          const row = document.createElement('tr');
+          const lineNum = ln.new_line ?? ln.old_line;
+
+          const tdOldLn = mkTd('ln', ln.old_line ?? '');
+          const tdOldSign = mkTd('sign', ' ');
+          const tdOldCode = mkTd('code', ln.content);
+          tdOldCode.parentElement; // not appended yet
+
+          const tdDivider = document.createElement('td');
+          tdDivider.className = 'split-divider';
+
+          const tdNewLn = mkTd('ln ln-click', ln.new_line ?? '');
+          tdNewLn.title = 'Add comment';
+          tdNewLn.addEventListener('click', () =>
+            openCommentInput(fileName, lineNum, ln.content, row)
+          );
+          const tdNewSign = mkTd('sign', ' ');
+          const tdNewCode = mkTd('code', ln.content);
+
+          // Apply background via class on cells
+          [tdOldLn, tdOldSign, tdOldCode].forEach(el => el.classList.add('split-old'));
+          [tdNewLn, tdNewSign, tdNewCode].forEach(el => el.classList.add('split-new'));
+
+          row.appendChild(tdOldLn);
+          row.appendChild(tdOldSign);
+          row.appendChild(tdOldCode);
+          row.appendChild(tdDivider);
+          row.appendChild(tdNewLn);
+          row.appendChild(tdNewSign);
+          row.appendChild(tdNewCode);
+          table.appendChild(row);
+
+          for (const c of commentsFor(fileName, lineNum)) {
+            table.appendChild(makeInlineCommentRow(c, 7));
+          }
+          i++;
+
+        } else if (ln.type === 'removed' || ln.type === 'added') {
+          // Collect the block of removed then added lines
+          const removed = [];
+          const added = [];
+          while (i < lines.length && lines[i].type === 'removed') {
+            removed.push(lines[i++]);
+          }
+          while (i < lines.length && lines[i].type === 'added') {
+            added.push(lines[i++]);
+          }
+
+          const blockLen = Math.max(removed.length, added.length);
+          for (let j = 0; j < blockLen; j++) {
+            const rem = removed[j];
+            const add = added[j];
+            const row = document.createElement('tr');
+
+            if (rem) {
+              row.appendChild(mkTd('ln split-old', rem.old_line ?? ''));
+              row.appendChild(mkTd('sign split-old has-content', '-'));
+              row.appendChild(mkTd('code split-old has-content', rem.content));
+            } else {
+              row.appendChild(mkTd('ln split-old', ''));
+              row.appendChild(mkTd('sign split-old', ''));
+              row.appendChild(mkTd('code split-old', ''));
+            }
+
+            const tdDivider = document.createElement('td');
+            tdDivider.className = 'split-divider';
+            row.appendChild(tdDivider);
+
+            if (add) {
+              const lineNum = add.new_line ?? add.old_line;
+              const tdNewLn = mkTd('ln split-new has-content ln-click', add.new_line ?? '');
+              tdNewLn.title = 'Add comment';
+              tdNewLn.addEventListener('click', () =>
+                openCommentInput(fileName, lineNum, add.content, row)
+              );
+              row.appendChild(tdNewLn);
+              row.appendChild(mkTd('sign split-new has-content', '+'));
+              row.appendChild(mkTd('code split-new has-content', add.content));
+
+              table.appendChild(row);
+              for (const c of commentsFor(fileName, lineNum)) {
+                table.appendChild(makeInlineCommentRow(c, 7));
+              }
+            } else {
+              row.appendChild(mkTd('ln split-new', ''));
+              row.appendChild(mkTd('sign split-new', ''));
+              row.appendChild(mkTd('code split-new', ''));
+              table.appendChild(row);
+            }
+          }
+        } else {
+          i++;
+        }
+      }
+    }
+    container.appendChild(table);
+  }
+
+  function mkTd(className, text) {
+    const td = document.createElement('td');
+    td.className = className;
+    td.textContent = text;
+    return td;
+  }
+
+  // ── Main render ──────────────────────────────────────────────────────────
+  function renderDiff() {
+    const panel = document.getElementById('diff-panel');
+    panel.innerHTML = '';
+
+    for (const file of diffFiles) {
+      const block = document.createElement('div');
+      block.className = 'file-block';
+
+      const header = document.createElement('div');
+      header.className = 'file-header';
+      header.textContent = file.new_file || file.old_file;
+      block.appendChild(header);
+
+      if (viewMode === 'unified') {
+        renderUnified(file, block);
+      } else {
+        renderSplit(file, block);
+      }
+
+      panel.appendChild(block);
+    }
+  }
+
+  function renderSidebar() {
+    const list = document.getElementById('comment-list');
+    const empty = document.getElementById('empty-sidebar');
+    list.innerHTML = '';
+
+    if (comments.length === 0) {
+      list.appendChild(empty);
+      return;
+    }
+
+    for (const c of comments) {
+      const div = document.createElement('div');
+      div.className = `sc${c.resolved ? ' resolved' : ''}`;
+      div.title = 'Click to jump to line';
+      div.addEventListener('click', () => scrollToLine(c.file, c.line));
+
+      const loc = document.createElement('div');
+      loc.className = 'sc-loc';
+      loc.textContent = `${c.file}:${c.line}`;
+
+      const text = document.createElement('div');
+      text.className = 'sc-text';
+      text.textContent = c.comment;
+
+      div.appendChild(loc);
+      div.appendChild(text);
+
+      if (c.resolution_note) {
+        const note = document.createElement('div');
+        note.className = 'sc-note';
+        note.textContent = '✓ ' + c.resolution_note;
+        div.appendChild(note);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'sc-actions';
+      const resolveBtn = document.createElement('button');
+      resolveBtn.className = 'small';
+      resolveBtn.textContent = c.resolved ? 'Unresolve' : 'Resolve';
+      resolveBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        await apiSetResolved(c.id, !c.resolved);
+        await reloadComments();
+      });
+      actions.appendChild(resolveBtn);
+      div.appendChild(actions);
+
+      list.appendChild(div);
+    }
+  }
+
+  function scrollToLine(file, line) {
+    const row = document.querySelector(
+      `[data-file="${CSS.escape(file)}"][data-line="${line}"]`
+    );
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // ── Data loading ─────────────────────────────────────────────────────────
+  async function reloadComments() {
+    const data = await apiGetComments();
+    comments = data.comments || [];
+    renderDiff();
+    renderSidebar();
+    updateStats();
+  }
+
+  async function loadAll() {
+    const diffData = await apiGetDiff();
+    if (!diffData) return; // no patch loaded yet
+
+    diffFiles = diffData.files;
+    const reviewData = await apiGetComments();
+    comments = reviewData.comments || [];
+
+    if (reviewData.patch_file) {
+      document.getElementById('patch-name').textContent = reviewData.patch_file;
+    }
+
+    showReviewLayout();
+  }
+
+  async function handleUpload(file) {
+    const result = await apiUpload(file);
+    document.getElementById('patch-name').textContent = result.filename;
+
+    const diffData = await apiGetDiff();
+    diffFiles = diffData.files;
+    comments = [];
+
+    showReviewLayout();
+  }
+
+  function showReviewLayout() {
+    document.getElementById('upload-area').classList.add('hidden');
+    document.getElementById('review-layout').classList.remove('hidden');
+    document.getElementById('view-toggle').classList.remove('hidden');
+    renderDiff();
+    renderSidebar();
+    updateStats();
+  }
+
+  // ── Event wiring ─────────────────────────────────────────────────────────
+  document.getElementById('drop-zone').addEventListener('click', () => {
+    document.getElementById('file-input').click();
+  });
+
+  document.getElementById('file-input').addEventListener('change', e => {
+    if (e.target.files[0]) handleUpload(e.target.files[0]);
+  });
+
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]);
+  });
+
+  document.getElementById('btn-unified').addEventListener('click', () => {
+    viewMode = 'unified';
+    document.getElementById('btn-unified').classList.add('active');
+    document.getElementById('btn-split').classList.remove('active');
+    closeCommentInput();
+    renderDiff();
+  });
+
+  document.getElementById('btn-split').addEventListener('click', () => {
+    viewMode = 'split';
+    document.getElementById('btn-split').classList.add('active');
+    document.getElementById('btn-unified').classList.remove('active');
+    closeCommentInput();
+    renderDiff();
+  });
+
+  document.getElementById('btn-reload').addEventListener('click', reloadComments);
+
+  document.getElementById('btn-clear-resolved').addEventListener('click', async () => {
+    if (!confirm('Delete all resolved comments?')) return;
+    const resolved = comments.filter(c => c.resolved);
+    await Promise.all(resolved.map(c => apiDeleteComment(c.id)));
+    await reloadComments();
+  });
+
+  // ── Boot ─────────────────────────────────────────────────────────────────
+  loadAll();
+</script>
+
+</body>
+</html>

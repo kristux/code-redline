@@ -175,6 +175,17 @@ async def patch_comment(comment_id: str, body: CommentPatch):
     raise HTTPException(status_code=404, detail="Comment not found")
 
 
+@app.delete("/comments/{comment_id}")
+async def delete_comment(comment_id: str):
+    review = load_review()
+    before = len(review["comments"])
+    review["comments"] = [c for c in review["comments"] if c["id"] != comment_id]
+    if len(review["comments"]) == before:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    save_review(review)
+    return {"deleted": comment_id}
+
+
 # --- Entrypoint ---
 
 def _open_browser():
