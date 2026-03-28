@@ -54,6 +54,7 @@ def test_create_review_returns_id_and_url(client):
     assert data["url"] == f"/reviews/{data['id']}"
     assert data["files"] == 2
     assert data["patch_file"] == "my.patch"
+    assert data["revision"] == 1
 
 
 def test_create_review_persists_to_disk(client, tmp_path, monkeypatch):
@@ -61,8 +62,17 @@ def test_create_review_persists_to_disk(client, tmp_path, monkeypatch):
     monkeypatch.setattr(review_server, "REVIEWS_DIR", reviews_dir)
     r = client.post("/reviews", files={"file": ("my.patch", TEST_PATCH, "text/plain")})
     rid = r.json()["id"]
-    assert (reviews_dir / rid / "review.patch").exists()
+    assert (reviews_dir / rid / "r1.patch").exists()
     assert (reviews_dir / rid / "review.json").exists()
+
+
+def test_create_review_schema(client):
+    r = client.post("/reviews", files={"file": ("my.patch", TEST_PATCH, "text/plain")})
+    rid = r.json()["id"]
+    data = client.get(f"/reviews/{rid}/comments").json()
+    assert len(data["revisions"]) == 1
+    assert data["revisions"][0]["revision"] == 1
+    assert data["revisions"][0]["patch_file"] == "my.patch"
 
 
 # --- GET /reviews ---
@@ -88,6 +98,7 @@ def test_list_reviews_includes_comment_counts(review):
     rv = next(r for r in client.get("/reviews").json() if r["id"] == rid)
     assert rv["comment_count"] == 1
     assert rv["unresolved_count"] == 1
+    assert rv["revision_count"] == 1
 
 
 # --- GET /reviews/{id}/diff ---
@@ -143,6 +154,7 @@ def test_add_comment_returns_comment(review):
     assert c["line"] == 2
     assert c["resolved"] is False
     assert c["id"].startswith("c")
+    assert c["revision"] == 1
 
 
 def test_add_comment_persists(review):
@@ -222,3 +234,79 @@ def test_delete_comment(review):
 def test_delete_unknown_comment_returns_404(review):
     client, rid = review
     assert client.delete(f"/reviews/{rid}/comments/nope").status_code == 404
+
+
+# --- POST /reviews/{id}/revisions ---
+
+PATCH_V2 = """\
+--- a/foo.py
++++ b/foo.py
+@@ -1,4 +1,4 @@
+ def hello():
+-    print("hello world")
+-    return True
++    logging.info("hello world")
++    return True  # updated
+
+"""
+
+
+def test_add_revision_increments_revision(review):
+    client, rid = review
+    r = client.post(f"/reviews/{rid}/revisions",
+                    files={"file": ("v2.patch", PATCH_V2, "text/plain")})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["revision"] == 2
+    assert data["patch_file"] == "v2.patch"
+    assert data["url"] == f"/reviews/{rid}"
+
+
+def test_add_revision_updates_diff(review):
+    client, rid = review
+    client.post(f"/reviews/{rid}/revisions",
+                files={"file": ("v2.patch", PATCH_V2, "text/plain")})
+    files = client.get(f"/reviews/{rid}/diff").json()["files"]
+    assert files[0]["new_file"] == "foo.py"
+    assert len(files) == 1  # v2 patch only touches foo.py
+
+
+def test_add_revision_persists_patch_file(review, tmp_path, monkeypatch):
+    client, rid = review
+    # Already have r1.patch; adding revision should create r2.patch
+    client.post(f"/reviews/{rid}/revisions",
+                files={"file": ("v2.patch", PATCH_V2, "text/plain")})
+    data = client.get(f"/reviews/{rid}/comments").json()
+    assert len(data["revisions"]) == 2
+    assert data["revisions"][1]["revision"] == 2
+
+
+def test_existing_comments_carry_over_with_revision_tag(review):
+    client, rid = review
+    c = client.post(f"/reviews/{rid}/comments", json={
+        "file": "foo.py", "line": 2, "line_content": "x", "comment": "fix this"
+    }).json()
+    assert c["revision"] == 1
+
+    client.post(f"/reviews/{rid}/revisions",
+                files={"file": ("v2.patch", PATCH_V2, "text/plain")})
+
+    comments = client.get(f"/reviews/{rid}/comments").json()["comments"]
+    assert len(comments) == 1
+    assert comments[0]["revision"] == 1  # still tagged as rev 1
+
+
+def test_new_comment_on_rev2_tagged_correctly(review):
+    client, rid = review
+    client.post(f"/reviews/{rid}/revisions",
+                files={"file": ("v2.patch", PATCH_V2, "text/plain")})
+    c = client.post(f"/reviews/{rid}/comments", json={
+        "file": "foo.py", "line": 2, "line_content": "x", "comment": "new comment"
+    }).json()
+    assert c["revision"] == 2
+
+
+def test_add_revision_unknown_review_returns_404(client):
+    r = client.post("/reviews/doesnotexist/revisions",
+                    files={"file": ("v2.patch", PATCH_V2, "text/plain")})
+    assert r.status_code == 404

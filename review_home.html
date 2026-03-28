@@ -183,6 +183,13 @@
         ? new Date(rv.created_at).toLocaleString()
         : '';
 
+      if (rv.revision_count > 1) {
+        const rev = document.createElement('span');
+        rev.className = 'rc-badge no-comments';
+        rev.textContent = `${rv.revision_count} revisions`;
+        a.appendChild(rev);
+      }
+
       const badge = document.createElement('span');
       badge.className = 'rc-badge';
       if (rv.comment_count === 0) {

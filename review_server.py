@@ -18,9 +18,8 @@ REVIEWS_DIR = Path("reviews")
 HOME_HTML = Path("review_home.html")
 UI_HTML = Path("review_ui.html")
 
-# Parsed diff cache keyed by review ID
+# Parsed diff cache keyed by review ID (always the latest revision)
 _diff_cache: dict[str, list] = {}
-
 
 
 def parse_unified_diff(content: str) -> list:
@@ -71,13 +70,11 @@ def parse_unified_diff(content: str) -> list:
                 )
                 old_num += 1
                 new_num += 1
-            # "\ No newline at end of file" lines are ignored
 
     if current_file is not None:
         files.append(current_file)
 
     return files
-
 
 
 def review_dir(review_id: str) -> Path:
@@ -99,12 +96,13 @@ def save_review(review_id: str, data: dict) -> None:
 
 def get_diff(review_id: str) -> list:
     if review_id not in _diff_cache:
-        patch_path = review_dir(review_id) / "review.patch"
+        review = load_review(review_id)
+        revision = len(review["revisions"])
+        patch_path = review_dir(review_id) / f"r{revision}.patch"
         if not patch_path.exists():
             raise HTTPException(status_code=404, detail="Review not found")
         _diff_cache[review_id] = parse_unified_diff(patch_path.read_text())
     return _diff_cache[review_id]
-
 
 
 class CommentCreate(BaseModel):
@@ -117,7 +115,6 @@ class CommentCreate(BaseModel):
 class CommentPatch(BaseModel):
     resolved: bool
     resolution_note: Optional[str] = None
-
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -138,12 +135,15 @@ async def list_reviews():
             continue
         try:
             data = json.loads(meta_path.read_text())
+            revisions = data.get("revisions", [])
+            latest = revisions[-1] if revisions else {}
             total = len(data.get("comments", []))
             unresolved = sum(1 for c in data.get("comments", []) if not c.get("resolved"))
             reviews.append({
                 "id": d.name,
-                "patch_file": data.get("patch_file"),
-                "created_at": data.get("created_at"),
+                "patch_file": latest.get("patch_file"),
+                "created_at": revisions[0].get("created_at") if revisions else None,
+                "revision_count": len(revisions),
                 "comment_count": total,
                 "unresolved_count": unresolved,
                 "url": f"/reviews/{d.name}",
@@ -151,7 +151,6 @@ async def list_reviews():
         except (json.JSONDecodeError, KeyError):
             continue
     return reviews
-
 
 
 @app.post("/reviews")
@@ -165,22 +164,54 @@ async def create_review(file: UploadFile = File(...)):
     parsed = parse_unified_diff(content)
     _diff_cache[review_id] = parsed
 
-    (review_dir(review_id) / "review.patch").write_text(content)
+    (review_dir(review_id) / "r1.patch").write_text(content)
 
     review = {
-        "patch_file": file.filename,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "revisions": [
+            {
+                "revision": 1,
+                "patch_file": file.filename,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ],
         "comments": [],
     }
     save_review(review_id, review)
 
     return {
         "id": review_id,
+        "revision": 1,
         "patch_file": file.filename,
         "files": len(parsed),
         "url": f"/reviews/{review_id}",
     }
 
+
+@app.post("/reviews/{review_id}/revisions")
+async def add_revision(review_id: str, file: UploadFile = File(...)):
+    review = load_review(review_id)
+    content = (await file.read()).decode("utf-8", errors="replace")
+    revision = len(review["revisions"]) + 1
+
+    (review_dir(review_id) / f"r{revision}.patch").write_text(content)
+
+    parsed = parse_unified_diff(content)
+    _diff_cache[review_id] = parsed
+
+    review["revisions"].append({
+        "revision": revision,
+        "patch_file": file.filename,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    save_review(review_id, review)
+
+    return {
+        "id": review_id,
+        "revision": revision,
+        "patch_file": file.filename,
+        "files": len(parsed),
+        "url": f"/reviews/{review_id}",
+    }
 
 
 @app.get("/reviews/{review_id}", response_class=HTMLResponse)
@@ -190,7 +221,6 @@ async def serve_review(review_id: str):
     if not UI_HTML.exists():
         return HTMLResponse("<h1>review_ui.html not found</h1>", status_code=503)
     return HTMLResponse(UI_HTML.read_text())
-
 
 
 @app.get("/reviews/{review_id}/diff")
@@ -206,8 +236,10 @@ async def get_review_comments(review_id: str):
 @app.post("/reviews/{review_id}/comments")
 async def add_comment(review_id: str, body: CommentCreate):
     review = load_review(review_id)
+    revision = len(review["revisions"])
     comment = {
         "id": f"c{uuid.uuid4().hex[:8]}",
+        "revision": revision,
         "file": body.file,
         "line": body.line,
         "line_content": body.line_content,
@@ -243,7 +275,6 @@ async def delete_comment(review_id: str, comment_id: str):
         raise HTTPException(status_code=404, detail="Comment not found")
     save_review(review_id, review)
     return {"deleted": comment_id}
-
 
 
 def _open_browser():

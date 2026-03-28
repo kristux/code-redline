@@ -14,20 +14,36 @@ line-level code review with none of the overhead.
 ## How it works
 
 ```
-p4 diff -du > review.patch       # or git diff, or any unified diff
-python review_server.py           # starts server, opens browser
-# add inline comments in the UI
-# tell your agent: "action the review comments in review.json"
-# refresh to see what's resolved
+# Agent creates the review
+curl -X POST http://localhost:7890/reviews -F "file=@review.patch"
+# → {"id": "abc123", "url": "/reviews/abc123", ...}
+
+# Developer opens the URL, adds inline comments in the browser
+
+# Agent reads review.json, actions the comments, uploads a new revision
+curl -X POST http://localhost:7890/reviews/abc123/revisions -F "file=@review.patch"
+
+# Developer refreshes to see what's resolved
 ```
 
-## Features
+## Revision convention
 
-- Accepts any standard unified diff/patch file
-- Line-level inline comments
-- Comments stored in a plain `review.json` file your agent can read and update
-- Resolved/unresolved tracking
-- No build step, no database, no accounts
+Each revision should be a **full diff from the base branch**, not an incremental
+diff from the previous revision. This ensures the review always shows the complete
+picture of what changed.
+
+```bash
+git diff main > review.patch        # correct — full diff from base
+git diff HEAD > review.patch        # wrong — only shows last commit
+```
+
+The same applies to subsequent revisions after the agent addresses comments:
+
+```bash
+# After agent makes changes:
+git diff main > review.patch
+curl -X POST http://localhost:7890/reviews/abc123/revisions -F "file=@review.patch"
+```
 
 ## VCS compatibility
 
@@ -35,30 +51,28 @@ Any tool that produces a unified diff works:
 
 | VCS | Command |
 |-----|---------|
+| Git | `git diff main > review.patch` |
 | Perforce | `p4 diff -du > review.patch` |
-| Git | `git diff > review.patch` |
 | SVN | `svn diff > review.patch` |
 | Generic | `diff -u original.py modified.py > review.patch` |
 
 ## Agent integration
 
-The agent reads two files:
+After actioning comments, the agent updates `review.json` directly:
 
-- `review.patch` — to understand what changed
-- `review.json` — to get your comments and mark them resolved
+- Set `resolved: true` and `resolved_at` (ISO timestamp) on each addressed comment
+- Optionally add `resolution_note` explaining what was changed
+- Upload a new revision patch so the developer can see the updated diff
 
-No MCP server, no special tooling. Just files.
+No MCP server, no special tooling. Just files and a REST API.
 
 ## Installation
 
 ```bash
-pip install fastapi uvicorn
-python review_server.py
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python review_server.py
 ```
-
-## Status
-
-Early development. Contributions welcome.
 
 ## License
 

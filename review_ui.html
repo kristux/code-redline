@@ -324,6 +324,25 @@
     .form-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 
     .hidden { display: none !important; }
+
+    #revision-badge {
+      font-size: 11px;
+      background: #444c56;
+      color: #8b949e;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+    .rev-tag {
+      font-size: 10px;
+      background: #444c56;
+      color: #8b949e;
+      padding: 1px 5px;
+      border-radius: 8px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    #btn-upload-revision { display: none; }
+    #revision-file-input { display: none; }
   </style>
 </head>
 <body>
@@ -331,11 +350,14 @@
 <header id="topbar">
   <a href="/" id="topbar-title" style="color:inherit;text-decoration:none;">patch-review</a>
   <span id="patch-name"></span>
+  <span id="revision-badge" class="hidden"></span>
   <div id="view-toggle" class="hidden">
     <button id="btn-unified" class="active">Unified</button>
     <button id="btn-split">Split</button>
   </div>
   <span id="comment-stats" class="hidden"></span>
+  <button id="btn-upload-revision" class="small">Upload revision</button>
+  <input type="file" id="revision-file-input" accept=".patch,.diff">
   <button id="btn-clear-resolved" class="small danger hidden">Clear resolved</button>
 </header>
 
@@ -359,6 +381,7 @@
 
   let diffFiles = [];
   let comments = [];
+  let currentRevision = 1;
   let viewMode = 'unified'; // 'unified' | 'split'
   let activeInputRow = null;
 
@@ -397,6 +420,14 @@
 
   async function apiDeleteComment(id) {
     const r = await fetch(`${API}/comments/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function apiUploadRevision(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(`${API}/revisions`, { method: 'POST', body: fd });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
@@ -518,6 +549,12 @@
     const text = document.createElement('div');
     text.className = 'ic-text';
     text.textContent = c.comment;
+    if (c.revision && c.revision < currentRevision) {
+      const tag = document.createElement('span');
+      tag.className = 'rev-tag';
+      tag.textContent = `rev ${c.revision}`;
+      text.appendChild(tag);
+    }
     div.appendChild(text);
 
     if (c.resolution_note) {
@@ -785,6 +822,12 @@
       const text = document.createElement('div');
       text.className = 'sc-text';
       text.textContent = c.comment;
+      if (c.revision && c.revision < currentRevision) {
+        const tag = document.createElement('span');
+        tag.className = 'rev-tag';
+        tag.textContent = `rev ${c.revision}`;
+        text.appendChild(tag);
+      }
 
       div.appendChild(loc);
       div.appendChild(text);
@@ -835,12 +878,18 @@
 
     diffFiles = diffData.files;
     comments = reviewData.comments || [];
+    currentRevision = reviewData.revisions ? reviewData.revisions.length : 1;
 
-    if (reviewData.patch_file) {
-      document.getElementById('patch-name').textContent = reviewData.patch_file;
+    const latest = reviewData.revisions?.[reviewData.revisions.length - 1];
+    if (latest) {
+      document.getElementById('patch-name').textContent = latest.patch_file;
+      const badge = document.getElementById('revision-badge');
+      badge.textContent = `rev ${currentRevision}`;
+      badge.classList.remove('hidden');
     }
 
     document.getElementById('view-toggle').classList.remove('hidden');
+    document.getElementById('btn-upload-revision').style.display = '';
     renderDiff();
     renderSidebar();
     updateStats();
@@ -870,6 +919,26 @@
     const resolved = comments.filter(c => c.resolved);
     await Promise.all(resolved.map(c => apiDeleteComment(c.id)));
     await reloadComments();
+  });
+
+  document.getElementById('btn-upload-revision').addEventListener('click', () => {
+    document.getElementById('revision-file-input').click();
+  });
+
+  document.getElementById('revision-file-input').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const btn = document.getElementById('btn-upload-revision');
+    btn.textContent = 'Uploading…';
+    btn.disabled = true;
+    try {
+      await apiUploadRevision(file);
+      await loadAll();
+    } finally {
+      btn.textContent = 'Upload revision';
+      btn.disabled = false;
+      e.target.value = '';
+    }
   });
 
   // ── Boot ─────────────────────────────────────────────────────────────────
