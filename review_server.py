@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-app = FastAPI(title="patch-review")
+app = FastAPI(title="code-redline")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 REVIEWS_DIR = Path("reviews")
