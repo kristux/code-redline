@@ -20,6 +20,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 REVIEWS_DIR = Path("reviews")
 HOME_HTML = Path("review_home.html")
 UI_HTML = Path("review_ui.html")
+INFO_HTML = Path("info.html")
 
 # Parsed diff cache keyed by review ID (always the latest revision)
 _diff_cache: dict[str, list] = {}
@@ -147,6 +148,13 @@ class CommentCreate(BaseModel):
 class CommentPatch(BaseModel):
     resolved: bool
     resolution_note: Optional[str] = None
+
+
+@app.get("/info", response_class=HTMLResponse)
+async def serve_info():
+    if not INFO_HTML.exists():
+        return HTMLResponse("<h1>info.html not found</h1>", status_code=503)
+    return HTMLResponse(INFO_HTML.read_text())
 
 
 @app.get("/", response_class=HTMLResponse)

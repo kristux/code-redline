@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>code-redline — agent reference</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:     #07090d;
+      --panel:  #0e1219;
+      --cyan:   #4de8c2;
+      --text:   #c8d8e8;
+      --muted:  #4a6070;
+      --border: rgba(77,232,194,0.15);
+      --add:    rgba(40,180,100,0.15);
+      --rem:    rgba(220,60,60,0.15);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      padding: 40px 24px;
+      max-width: 780px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+    h1 { color: var(--cyan); font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; }
+    .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 40px; }
+    h2 { font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin: 32px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    p { margin-bottom: 10px; font-size: 13px; color: var(--text); }
+    code { color: var(--cyan); font-family: inherit; }
+    pre {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 14px 16px;
+      margin: 8px 0 16px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    pre .add { background: var(--add); display: block; }
+    pre .rem { background: var(--rem); display: block; }
+    pre .muted { color: var(--muted); display: block; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 12px; }
+    td, th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 400; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+    td:first-child { color: var(--cyan); white-space: nowrap; }
+    td code { color: var(--text); }
+    .method { color: var(--muted); }
+    .copy-box { position: relative; margin: 8px 0 16px; }
+    .copy-box pre { margin: 0; }
+    #btn-copy {
+      position: absolute;
+      top: 8px; right: 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    #btn-copy:hover { color: var(--cyan); border-color: var(--cyan); }
+    #btn-copy.copied { color: var(--cyan); }
+  </style>
+</head>
+<body>
+
+<h1>code-redline</h1>
+<p class="subtitle">Agent reference · <a href="/" style="color:var(--muted)">← home</a></p>
+
+<h2>Skill prompt</h2>
+<p>Copy this into any AI skill or system prompt to give an agent everything it needs to use code-redline.</p>
+<div class="copy-box">
+  <button id="btn-copy">Copy</button>
+  <pre id="skill-text">code-redline is a local code review server at http://localhost:7890.
+
+Workflow:
+1. Generate a full patch from the base branch:
+   git diff $(git merge-base HEAD main) > review.patch
+2. Create a review:
+   curl -X POST http://localhost:7890/reviews -F "file=@review.patch"
+   Response: {"id": "abc123", "url": "/reviews/abc123", ...}
+3. Developer opens the URL and adds inline comments in the browser.
+4. Read comments:
+   curl http://localhost:7890/reviews/abc123/comments
+5. Action each unresolved comment in the codebase.
+6. Mark comments resolved:
+   curl -X PATCH http://localhost:7890/reviews/abc123/comments/{cid} \
+     -H "Content-Type: application/json" \
+     -d '{"resolved": true, "resolution_note": "Refactored as suggested"}'
+7. Upload a new revision (full diff again, not incremental):
+   git diff $(git merge-base HEAD main) > review.patch
+   curl -X POST http://localhost:7890/reviews/abc123/revisions -F "file=@review.patch"
+
+Patch convention:
+- Every patch must be a full diff from the base branch, never incremental.
+- New files are included as long as they are tracked (git add).
+
+API:
+  POST   /reviews                        Create review, returns {id, url}
+  GET    /reviews/{id}/comments          Full review.json with all comments
+  POST   /reviews/{id}/comments          Add a comment
+  PATCH  /reviews/{id}/comments/{cid}    Resolve/unresolve (fields: resolved, resolution_note)
+  DELETE /reviews/{id}/comments/{cid}    Delete a comment
+  POST   /reviews/{id}/revisions         Upload a new revision patch</pre>
+</div>
+
+<h2>What it is</h2>
+<p>A local code review server running at <code>http://localhost:7890</code>. Developers upload patch files and add inline comments in the browser. Agents read those comments, action them in the codebase, and upload a revised patch.</p>
+
+<h2>Workflow</h2>
+<pre>
+<span class="muted"># 1. Generate a full patch from the base branch</span>
+git diff $(git merge-base HEAD main) > review.patch
+
+<span class="muted"># 2. Create a review</span>
+curl -X POST http://localhost:7890/reviews -F "file=@review.patch"
+<span class="muted"># → {"id": "abc123", "url": "/reviews/abc123", ...}</span>
+
+<span class="muted"># 3. Developer opens the URL and adds inline comments</span>
+
+<span class="muted"># 4. Read the comments</span>
+curl http://localhost:7890/reviews/abc123/comments
+
+<span class="muted"># 5. Action each unresolved comment in the codebase</span>
+
+<span class="muted"># 6. Mark comments resolved</span>
+curl -X PATCH http://localhost:7890/reviews/abc123/comments/c1a2b3c4 \
+  -H "Content-Type: application/json" \
+  -d '{"resolved": true, "resolution_note": "Refactored as suggested"}'
+
+<span class="muted"># 7. Upload a new revision (full diff again, not incremental)</span>
+git diff $(git merge-base HEAD main) > review.patch
+curl -X POST http://localhost:7890/reviews/abc123/revisions -F "file=@review.patch"
+</pre>
+
+<h2>Patch convention</h2>
+<p>Every patch — initial and revised — must be a <strong style="color:var(--text)">full diff from the base branch</strong>, not an incremental diff from the previous revision.</p>
+<pre>
+<span class="add">git diff $(git merge-base HEAD main) > review.patch   # correct</span>
+<span class="rem">git diff HEAD > review.patch                          # wrong — last commit only</span>
+</pre>
+<p>New files are included as long as they are tracked (<code>git add</code>). Untracked files will not appear in the diff.</p>
+
+<h2>API</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+  <tr><td><span class="method">POST</span></td><td><code>/reviews</code></td><td>Upload patch, create review. Returns <code>{id, url, revision, files}</code></td></tr>
+  <tr><td><span class="method">GET</span></td><td><code>/reviews/{id}/diff</code></td><td>Parsed diff for the latest revision</td></tr>
+  <tr><td><span class="method">GET</span></td><td><code>/reviews/{id}/comments</code></td><td>Full <code>review.json</code> including all comments</td></tr>
+  <tr><td><span class="method">POST</span></td><td><code>/reviews/{id}/comments</code></td><td>Add a comment</td></tr>
+  <tr><td><span class="method">PATCH</span></td><td><code>/reviews/{id}/comments/{cid}</code></td><td>Resolve or unresolve a comment</td></tr>
+  <tr><td><span class="method">DELETE</span></td><td><code>/reviews/{id}/comments/{cid}</code></td><td>Delete a comment</td></tr>
+  <tr><td><span class="method">POST</span></td><td><code>/reviews/{id}/revisions</code></td><td>Upload a new revision patch</td></tr>
+</table>
+
+<h2>Comment schema</h2>
+<pre>
+{
+  "id":              "c1a2b3c4",
+  "revision":        1,
+  "file":            "path/to/file.py",
+  "line":            45,
+  "line_content":    "    the actual line of code",
+  "comment":         "reviewer's comment text",
+  "resolved":        false,
+  "resolved_at":     null,
+  "resolution_note": null    <span class="muted">// optional — add when resolving</span>
+}
+</pre>
+
+<script>
+  document.getElementById('btn-copy').addEventListener('click', function() {
+    navigator.clipboard.writeText(document.getElementById('skill-text').textContent).then(() => {
+      this.textContent = 'Copied';
+      this.classList.add('copied');
+      setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 2000);
+    });
+  });
+</script>
+
+</body>
+</html>
