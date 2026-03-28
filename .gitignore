@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Review tool runtime files
+review.json
+review.patch
+*.patch
+*.diff
+
+# macOS
+.DS_Store
