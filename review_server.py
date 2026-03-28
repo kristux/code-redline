@@ -11,9 +11,11 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 app = FastAPI(title="patch-review")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 REVIEWS_DIR = Path("reviews")
 HOME_HTML = Path("review_home.html")
