@@ -7,6 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/review.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
 
@@ -268,6 +270,7 @@
     const table = document.createElement('table');
     table.className = 'diff-table';
     const fileName = file.new_file || file.old_file;
+    const lang = hlang(fileName);
 
     for (const hunk of file.hunks) {
       const hunkRow = document.createElement('tr');
@@ -314,9 +317,7 @@
         tdSign.className = 'sign';
         tdSign.textContent = ln.type === 'added' ? '+' : ln.type === 'removed' ? '-' : ' ';
 
-        const tdCode = document.createElement('td');
-        tdCode.className = 'code';
-        tdCode.textContent = ln.content;
+        const tdCode = mkCodeTd('code', ln.content, lang);
 
         row.appendChild(tdOld);
         row.appendChild(tdNew);
@@ -337,6 +338,7 @@
     const table = document.createElement('table');
     table.className = 'split-table';
     const fileName = file.new_file || file.old_file;
+    const lang = hlang(fileName);
 
     for (const hunk of file.hunks) {
       const hunkRow = document.createElement('tr');
@@ -359,7 +361,7 @@
 
           const tdOldLn = mkTd('ln', ln.old_line ?? '');
           const tdOldSign = mkTd('sign', ' ');
-          const tdOldCode = mkTd('code', ln.content);
+          const tdOldCode = mkCodeTd('code', ln.content, lang);
           tdOldCode.parentElement; // not appended yet
 
           const tdDivider = document.createElement('td');
@@ -371,7 +373,7 @@
             openCommentInput(fileName, lineNum, ln.content, row)
           );
           const tdNewSign = mkTd('sign', ' ');
-          const tdNewCode = mkTd('code', ln.content);
+          const tdNewCode = mkCodeTd('code', ln.content, lang);
 
           // Apply background via class on cells
           [tdOldLn, tdOldSign, tdOldCode].forEach(el => el.classList.add('split-old'));
@@ -411,7 +413,7 @@
             if (rem) {
               row.appendChild(mkTd('ln split-old', rem.old_line ?? ''));
               row.appendChild(mkTd('sign split-old has-content', '-'));
-              row.appendChild(mkTd('code split-old has-content', rem.content));
+              row.appendChild(mkCodeTd('code split-old has-content', rem.content, lang));
             } else {
               row.appendChild(mkTd('ln split-old', ''));
               row.appendChild(mkTd('sign split-old', ''));
@@ -431,7 +433,7 @@
               );
               row.appendChild(tdNewLn);
               row.appendChild(mkTd('sign split-new has-content', '+'));
-              row.appendChild(mkTd('code split-new has-content', add.content));
+              row.appendChild(mkCodeTd('code split-new has-content', add.content, lang));
 
               table.appendChild(row);
               for (const c of commentsFor(fileName, lineNum)) {
@@ -467,6 +469,23 @@
     const td = document.createElement('td');
     td.className = className;
     td.textContent = text;
+    return td;
+  }
+
+  function hlang(fileName) {
+    const ext = (fileName || '').split('.').pop().toLowerCase();
+    return {py: 'python', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', h: 'cpp', hpp: 'cpp',
+            json: 'json', yaml: 'yaml', yml: 'yaml'}[ext] || null;
+  }
+
+  function mkCodeTd(className, text, lang) {
+    const td = document.createElement('td');
+    td.className = className;
+    if (lang && text && window.hljs) {
+      td.innerHTML = hljs.highlight(text, {language: lang, ignoreIllegals: true}).value;
+    } else {
+      td.textContent = text;
+    }
     return td;
   }
 
