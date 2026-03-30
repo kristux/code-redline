@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY review_server.py .
 COPY review_home.html .
 COPY review_ui.html .
+COPY info.html .
 COPY static/ static/
 
 RUN mkdir -p reviews
