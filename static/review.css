@@ -212,6 +212,17 @@ button.small { padding: 2px 8px; font-size: 9px; }
 .sc.resolved .sc-text { text-decoration: line-through; }
 .sc-note { font-size: 10px; color: var(--ef-warn); margin-bottom: 4px; font-style: italic; }
 .sc-actions { display: flex; gap: 6px; }
+.sc-replies {
+  margin-top: 6px;
+  margin-left: 10px;
+  border-left: 1px solid var(--ef-border-dim);
+  padding-left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sc-reply { font-size: 10px; color: var(--ef-text); line-height: 1.5; }
+.sc-reply-text { opacity: 0.85; }
 
 /* ── File block ── */
 .file-block {
@@ -412,3 +423,59 @@ button.small { padding: 2px 8px; font-size: 9px; }
 #interdiff-controls select:focus { outline: none; border-color: var(--ef-border); }
 #btn-full-diff { color: var(--ef-cyan); border-color: var(--ef-border-dim); }
 #btn-full-diff:hover { background: var(--ef-cyan-glow); border-color: var(--ef-border); }
+
+/* ── Author badge ── */
+.author-badge {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  background: transparent;
+  border: 1px solid var(--ef-cyan-dim);
+  color: var(--ef-cyan);
+  padding: 1px 5px;
+  margin-right: 6px;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+/* ── Replies ── */
+.ic-replies {
+  margin-top: 6px;
+  border-top: 1px solid var(--ef-border-dim);
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ic-reply {
+  font-size: 11px;
+  color: var(--ef-text);
+  line-height: 1.5;
+  padding: 3px 0 3px 8px;
+  border-left: 1px solid var(--ef-border-dim);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ic-reply-text { flex: 1; }
+.ic-reply-ts { font-size: 9px; color: var(--ef-muted); white-space: nowrap; }
+
+/* ── Reply form (inline within comment) ── */
+.reply-form {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.reply-form textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--ef-border-dim);
+  border-radius: 0;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  resize: vertical;
+  min-height: 48px;
+  background: var(--ef-bg2);
+  color: var(--ef-text);
+}
+.reply-form textarea:focus { outline: none; border-color: var(--ef-border); box-shadow: 0 0 0 2px var(--ef-cyan-glow); }

@@ -143,11 +143,17 @@ class CommentCreate(BaseModel):
     line: int
     line_content: str
     comment: str
+    author: Optional[str] = None
 
 
 class CommentPatch(BaseModel):
     resolved: bool
     resolution_note: Optional[str] = None
+
+
+class ReplyCreate(BaseModel):
+    comment: str
+    author: Optional[str] = None
 
 
 @app.get("/info", response_class=HTMLResponse)
@@ -299,6 +305,7 @@ async def add_comment(review_id: str, body: CommentCreate):
     revision = len(review["revisions"])
     comment = {
         "id": f"c{uuid.uuid4().hex[:8]}",
+        "author": body.author,
         "revision": revision,
         "file": body.file,
         "line": body.line,
@@ -306,6 +313,7 @@ async def add_comment(review_id: str, body: CommentCreate):
         "comment": body.comment,
         "resolved": False,
         "resolved_at": None,
+        "replies": [],
     }
     review["comments"].append(comment)
     save_review(review_id, review)
@@ -335,6 +343,39 @@ async def delete_comment(review_id: str, comment_id: str):
         raise HTTPException(status_code=404, detail="Comment not found")
     save_review(review_id, review)
     return {"deleted": comment_id}
+
+
+@app.post("/reviews/{review_id}/comments/{comment_id}/replies")
+async def add_reply(review_id: str, comment_id: str, body: ReplyCreate):
+    review = load_review(review_id)
+    for c in review["comments"]:
+        if c["id"] == comment_id:
+            c.setdefault("replies", [])
+            reply = {
+                "id": f"r{uuid.uuid4().hex[:8]}",
+                "author": body.author,
+                "comment": body.comment,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            c["replies"].append(reply)
+            save_review(review_id, review)
+            return reply
+    raise HTTPException(status_code=404, detail="Comment not found")
+
+
+@app.delete("/reviews/{review_id}/comments/{comment_id}/replies/{reply_id}")
+async def delete_reply(review_id: str, comment_id: str, reply_id: str):
+    review = load_review(review_id)
+    for c in review["comments"]:
+        if c["id"] == comment_id:
+            c.setdefault("replies", [])
+            before = len(c["replies"])
+            c["replies"] = [r for r in c["replies"] if r["id"] != reply_id]
+            if len(c["replies"]) == before:
+                raise HTTPException(status_code=404, detail="Reply not found")
+            save_review(review_id, review)
+            return {"deleted": reply_id}
+    raise HTTPException(status_code=404, detail="Comment not found")
 
 
 def _open_browser():

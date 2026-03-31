@@ -102,6 +102,22 @@
     return r.json();
   }
 
+  async function apiAddReply(cid, comment) {
+    const r = await fetch(`${API}/comments/${cid}/replies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function apiDeleteReply(cid, rid) {
+    const r = await fetch(`${API}/comments/${cid}/replies/${rid}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
   async function apiUploadRevision(file) {
     const fd = new FormData();
     fd.append('file', file);
@@ -227,7 +243,13 @@
 
     const text = document.createElement('div');
     text.className = 'ic-text';
-    text.textContent = c.comment;
+    if (c.author) {
+      const badge = document.createElement('span');
+      badge.className = 'author-badge';
+      badge.textContent = c.author;
+      text.appendChild(badge);
+    }
+    text.appendChild(document.createTextNode(c.comment));
     if (c.revision && c.revision < currentRevision) {
       const tag = document.createElement('span');
       tag.className = 'rev-tag';
@@ -241,6 +263,43 @@
       note.className = 'ic-note';
       note.textContent = '✓ ' + c.resolution_note;
       div.appendChild(note);
+    }
+
+    // Replies
+    if (c.replies && c.replies.length > 0) {
+      const repliesDiv = document.createElement('div');
+      repliesDiv.className = 'ic-replies';
+      for (const reply of c.replies) {
+        const replyDiv = document.createElement('div');
+        replyDiv.className = 'ic-reply';
+        if (reply.author) {
+          const badge = document.createElement('span');
+          badge.className = 'author-badge';
+          badge.textContent = reply.author;
+          replyDiv.appendChild(badge);
+        }
+        const replyText = document.createElement('span');
+        replyText.className = 'ic-reply-text';
+        replyText.textContent = reply.comment;
+        replyDiv.appendChild(replyText);
+        if (reply.created_at) {
+          const ts = document.createElement('span');
+          ts.className = 'ic-reply-ts';
+          ts.textContent = new Date(reply.created_at).toLocaleString();
+          replyDiv.appendChild(ts);
+        }
+        const delBtn = document.createElement('button');
+        delBtn.className = 'small danger';
+        delBtn.textContent = '×';
+        delBtn.title = 'Delete reply';
+        delBtn.addEventListener('click', async () => {
+          await apiDeleteReply(c.id, reply.id);
+          await reloadComments();
+        });
+        replyDiv.appendChild(delBtn);
+        repliesDiv.appendChild(replyDiv);
+      }
+      div.appendChild(repliesDiv);
     }
 
     const meta = document.createElement('div');
@@ -258,7 +317,71 @@
       await reloadComments();
     });
     meta.appendChild(resolveBtn);
+
+    // Reply button + inline form
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'small';
+    replyBtn.textContent = 'Reply';
+
+    const replyForm = document.createElement('div');
+    replyForm.className = 'reply-form hidden';
+
+    const replyTextarea = document.createElement('textarea');
+    replyTextarea.placeholder = 'Add a reply…';
+
+    const replyHint = document.createElement('div');
+    replyHint.className = 'form-hint';
+    replyHint.textContent = '⌘↵ or Ctrl↵ to submit · Esc to cancel';
+
+    const replyBtns = document.createElement('div');
+    replyBtns.className = 'form-buttons';
+
+    const replyCancelBtn = document.createElement('button');
+    replyCancelBtn.className = 'cancel small';
+    replyCancelBtn.textContent = 'Cancel';
+
+    const replySubmitBtn = document.createElement('button');
+    replySubmitBtn.className = 'primary small';
+    replySubmitBtn.textContent = 'Reply';
+
+    replyBtn.addEventListener('click', () => {
+      replyForm.classList.remove('hidden');
+      replyBtn.classList.add('hidden');
+      replyTextarea.focus();
+    });
+    replyCancelBtn.addEventListener('click', () => {
+      replyForm.classList.add('hidden');
+      replyBtn.classList.remove('hidden');
+      replyTextarea.value = '';
+    });
+    replySubmitBtn.addEventListener('click', async () => {
+      const text = replyTextarea.value.trim();
+      if (!text) return;
+      replySubmitBtn.disabled = true;
+      replySubmitBtn.textContent = 'Saving…';
+      try {
+        await apiAddReply(c.id, text);
+        await reloadComments();
+      } catch (e) {
+        replySubmitBtn.disabled = false;
+        replySubmitBtn.textContent = 'Reply';
+        alert('Failed to save reply: ' + e.message);
+      }
+    });
+    replyTextarea.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) replySubmitBtn.click();
+      if (e.key === 'Escape') replyCancelBtn.click();
+    });
+
+    replyBtns.appendChild(replyCancelBtn);
+    replyBtns.appendChild(replySubmitBtn);
+    replyForm.appendChild(replyTextarea);
+    replyForm.appendChild(replyHint);
+    replyForm.appendChild(replyBtns);
+
+    meta.appendChild(replyBtn);
     div.appendChild(meta);
+    div.appendChild(replyForm);
 
     td.appendChild(div);
     tr.appendChild(td);
@@ -537,14 +660,19 @@
 
       const text = document.createElement('div');
       text.className = 'sc-text';
-      text.textContent = c.comment;
+      if (c.author) {
+        const badge = document.createElement('span');
+        badge.className = 'author-badge';
+        badge.textContent = c.author;
+        text.appendChild(badge);
+      }
+      text.appendChild(document.createTextNode(c.comment));
       if (c.revision && c.revision < currentRevision) {
         const tag = document.createElement('span');
         tag.className = 'rev-tag';
         tag.textContent = `rev ${c.revision}`;
         text.appendChild(tag);
       }
-
       div.appendChild(loc);
       div.appendChild(text);
 
@@ -553,6 +681,28 @@
         note.className = 'sc-note';
         note.textContent = '✓ ' + c.resolution_note;
         div.appendChild(note);
+      }
+
+      if (c.replies && c.replies.length > 0) {
+        const repliesDiv = document.createElement('div');
+        repliesDiv.className = 'sc-replies';
+        for (const reply of c.replies) {
+          const replyDiv = document.createElement('div');
+          replyDiv.className = 'sc-reply';
+          replyDiv.addEventListener('click', e => e.stopPropagation());
+          if (reply.author) {
+            const badge = document.createElement('span');
+            badge.className = 'author-badge';
+            badge.textContent = reply.author;
+            replyDiv.appendChild(badge);
+          }
+          const replyText = document.createElement('span');
+          replyText.className = 'sc-reply-text';
+          replyText.textContent = reply.comment;
+          replyDiv.appendChild(replyText);
+          repliesDiv.appendChild(replyDiv);
+        }
+        div.appendChild(repliesDiv);
       }
 
       const actions = document.createElement('div');
